@@ -36,7 +36,19 @@ namespace CSVParser
             }
         }
         public readonly List<List<String>> Data = new List<List<string>>();
-        private string ListSeparator;
+        private char _ListSeparator= System.Threading.Thread.CurrentThread.CurrentCulture.TextInfo.ListSeparator[0];
+        private char ListSeparator
+        {
+            get
+            {
+                return _ListSeparator;
+            }
+            set
+            {
+                if (char.IsPunctuation(value))
+                    _ListSeparator = value;
+            }
+        }
         private int Rows=0;
         private int Columns=0;
 
@@ -73,9 +85,6 @@ namespace CSVParser
                 throw new FileNotFoundException("CSV Error: File is missing or mistyped.", FilePath + FileName);
             }
 
-            //Detect text speciffic regional settings
-            DetectRegionalSettings();
-
             //Generate Data
             GenerateData();
         }
@@ -102,14 +111,11 @@ namespace CSVParser
                 throw new FileNotFoundException("CSV Error: File is missing or mistyped.", FilePath + FileName);
             }
 
-            //Detect text speciffic regional settings
-            DetectRegionalSettings();
-
             //Generate Data
             GenerateData();
         }
 
-        public CSV(string fileName, string filePath, string listSeparator)
+        public CSV(string fileName, string filePath, char listSeparator)
         {
             FileName = fileName;
 
@@ -140,16 +146,6 @@ namespace CSVParser
         //**********************
         //Methods
         //**********************
-        private void DetectRegionalSettings()
-        {
-            System.Globalization.CultureInfo currentUserCulture = System.Threading.Thread.CurrentThread.CurrentCulture;
-            if (String.IsNullOrEmpty(ListSeparator))
-            {
-                //Detect region speciffic list separator
-                ListSeparator = currentUserCulture.TextInfo.ListSeparator;
-            }
-        }
-
         private void GenerateData()
         {
             try
@@ -158,14 +154,18 @@ namespace CSVParser
                 {
                     while (!reader.EndOfStream)
                     {
-                        //line is string with whole line
-                        string line = reader.ReadLine();
-                        //values is string array with sepparated values
-                        string[] values = line.Split(ListSeparator.ToCharArray());
+                        //Read single line
+                        string line = ReadLine(reader);
 
-                        Data.Add(values.ToList());
-                        if (values.Length > Columns)
-                            Columns = values.Length;
+                        //Parse single line to List of strings
+                        List<string> values = ParseLine(line);
+                        
+                        //Add values to Data
+                        Data.Add(values);
+
+                        //Count number of Columns and Rows
+                        if (values.Capacity > Columns)
+                            Columns = values.Capacity;
                         Rows++;
                     }
                 }
@@ -174,7 +174,70 @@ namespace CSVParser
             {
                 throw new ParserException("CSV parser was unable to parse the file.", e);
             }
-            Data.TrimExcess();
+        }
+
+        private List<string> ParseLine(string line)
+        {
+            //Idea is to go charachter by character and check if there
+            //  any cell embraced with doublecolons, else new line is
+            //  indicated with lineseparator
+            List<string> values = new List<string>();
+            bool doublecolon = false;
+            int start = 0;
+            for (int i = 0; i < line.Length; i++)
+            {
+                if (doublecolon)
+                {
+                    if (line[i].Equals('\"'))
+                    {
+                        values.Add(line.Substring(start, i - start));
+                        doublecolon = false;
+                        start = ++i + 1;
+                    }
+                }
+                else if (line[i].Equals('\"'))
+                {
+                    start = i + 1;
+                    doublecolon = true;
+                }
+                else if (line[i].Equals(ListSeparator))
+                {
+                    values.Add(line.Substring(start, i - start));
+                    start = i + 1;
+                }
+            }
+            values.TrimExcess();
+            return values;
+        }
+
+        private string ReadLine(StreamReader reader)
+        {
+            //line is string with whole line
+            string line = reader.ReadLine();
+            //check if there is odd number of "
+            if (AllIndexesOf(line, "\"").Count % 2 == 1)
+            {
+                do
+                {
+                    string temp = reader.ReadLine();
+                    line += Environment.NewLine + temp;
+                } while (AllIndexesOf(line, "\"").Count % 2 == 1);
+            }
+            return line;
+        }
+
+        private List<int> AllIndexesOf(string str, string value)
+        {
+            if (String.IsNullOrEmpty(value))
+                throw new ArgumentException("The string to find may not be empty","value");
+            List<int> indexes = new List<int>();
+            for(int index=0; ;index+=value.Length)
+            {
+                index = str.IndexOf(value, index);
+                if (index == -1)
+                    return indexes;
+                indexes.Add(index);
+            }
         }
 
         public string[,] GetStringArray()
